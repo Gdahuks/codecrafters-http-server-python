@@ -10,6 +10,7 @@ PORT = 4221
 
 class Status(Enum):
     OK = "200 OK"
+    CREATED = "201 Created"
     NOT_FOUND = "404 Not Found"
 
 
@@ -42,7 +43,7 @@ class Server:
 
     def handle_request(self, connection: socket.socket, data: str):
         headers, body = Server.get_headers_and_body(data)
-        _, path, _ = Server.get_method_path_protocol(headers)
+        method, path, _ = Server.get_method_path_protocol(headers)
         if path.startswith("/echo/"):
             body_response = path[len("/echo/") :]
             headers_response = ["Content-Type: text/plain"]
@@ -56,15 +57,21 @@ class Server:
             Server.response(connection, Status.OK, headers_response, body_response)
         elif path.startswith("/files/"):
             file_path = os.path.join(self.directory, path[len("/files/"):])
-            if os.path.exists(file_path) and os.path.isfile(file_path):
-                with open(file_path, "rb") as file:
-                    body_response = file.read().decode()
-                    headers_response = ["Content-Type: application/octet-stream"]
-                    Server.response(
-                        connection, Status.OK, headers_response, body_response
-                    )
-            else:
-                Server.response(connection, Status.NOT_FOUND, [], "")
+
+            if method == "POST":
+                with open(file_path, "wb") as file:
+                    file.write(body.encode())
+                Server.response(connection, Status.CREATED, [], "")
+            elif method == "GET":
+                if os.path.exists(file_path) and os.path.isfile(file_path):
+                    with open(file_path, "rb") as file:
+                        body_response = file.read().decode()
+                        headers_response = ["Content-Type: application/octet-stream"]
+                        Server.response(
+                            connection, Status.OK, headers_response, body_response
+                        )
+                else:
+                    Server.response(connection, Status.NOT_FOUND, [], "")
         elif path == "/":
             Server.response(connection, Status.OK, [], "")
         else:
