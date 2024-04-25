@@ -1,3 +1,5 @@
+import argparse
+import os
 import socket
 import threading
 from enum import Enum
@@ -12,11 +14,12 @@ class Status(Enum):
 
 
 class Server:
-    slots = ("host", "port")
+    slots = ("host", "port", "directory")
 
-    def __init__(self, host: str, port: int):
+    def __init__(self, host: str, port: int, directory: str):
         self.host = host
         self.port = port
+        self.directory = directory
 
     def run(self):
         with socket.create_server(
@@ -25,21 +28,19 @@ class Server:
             while True:
                 connection, _ = server_socket.accept()
                 thread = threading.Thread(
-                    target=Server.handle_connection, args=(connection,)
+                    target=self.handle_connection, args=(connection,)
                 )
                 thread.start()
 
-    @staticmethod
-    def handle_connection(connection: socket.socket):
+    def handle_connection(self, connection: socket.socket):
         with connection:
             while True:
                 data = connection.recv(4096).decode()
                 if data is None or data == "":
                     break
-                Server.handle_request(connection, data)
+                self.handle_request(connection, data)
 
-    @staticmethod
-    def handle_request(connection: socket.socket, data: str):
+    def handle_request(self, connection: socket.socket, data: str):
         headers, body = Server.get_headers_and_body(data)
         _, path, _ = Server.get_method_path_protocol(headers)
         if path.startswith("/echo/"):
@@ -50,9 +51,20 @@ class Server:
             user_agent_header = [
                 header for header in headers if header.startswith("User-Agent: ")
             ][0]
-            body_response = user_agent_header[len("User-Agent: ") :]
+            body_response = user_agent_header[len("User-Agent: "):]
             headers_response = ["Content-Type: text/plain"]
             Server.response(connection, Status.OK, headers_response, body_response)
+        elif path.startswith("/files/"):
+            file_path = os.path.join(self.directory, path[len("/files/"):])
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                with open(file_path, "rb") as file:
+                    body_response = file.read().decode()
+                    headers_response = ["Content-Type: application/octet-stream"]
+                    Server.response(
+                        connection, Status.OK, headers_response, body_response
+                    )
+            else:
+                Server.response(connection, Status.NOT_FOUND, [], "")
         elif path == "/":
             Server.response(connection, Status.OK, [], "")
         else:
@@ -86,11 +98,15 @@ class Server:
             str_builder.append(header)
         str_builder.append(f"Content-Length: {len(body.encode())}")
         str_builder.append(f"\r\n{body}")
-        connection.sendall("\r\n".join(str_builder).encode())
+        message = "\r\n".join(str_builder)
+        connection.sendall(message.encode())
 
 
 def main():
-    server = Server(HOST, PORT)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--directory", default="")
+    args = parser.parse_args()
+    server = Server(HOST, PORT, args.directory)
     server.run()
 
 
